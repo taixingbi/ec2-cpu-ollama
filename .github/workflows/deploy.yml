@@ -34,7 +34,7 @@ jobs:
       - name: Ensure EC2 instance exists
         id: ensure
         env:
-          AWS_AMI_ID: ${{ vars.AWS_AMI_ID || 'ami-01da1dbf9ea3a6ee6' }}
+          AWS_AMI_ID: ${{ vars.AWS_AMI_ID || 'ami-0071c8c431eea0edb' }}
           AWS_SECURITY_GROUP_ID: ${{ vars.AWS_SECURITY_GROUP_ID }}
           EC2_KEY_PAIR: ${{ vars.EC2_KEY_PAIR || 'ec2' }}
         run: |
