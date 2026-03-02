@@ -50,9 +50,16 @@ jobs:
             sudo systemctl restart ollama
 
             echo "=== Waiting for Ollama API ==="
-            for i in $(seq 1 30); do
+            sleep 5
+            for i in $(seq 1 45); do
               curl -sf http://127.0.0.1:11434/api/version >/dev/null && break
-              [ $i -eq 30 ] && { echo "Ollama failed to start"; exit 1; }
+              if [ $i -eq 45 ]; then
+                echo "Ollama failed to start after 90s. Service status:"
+                sudo systemctl status ollama || true
+                echo "Recent logs:"
+                sudo journalctl -u ollama --no-pager -n 50 || true
+                exit 1
+              fi
               sleep 2
             done
 
