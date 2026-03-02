@@ -3,7 +3,6 @@ name: Deploy Ollama (bge-small) to EC2
 on:
   push:
     branches:
-      - main
       - qa
   workflow_dispatch:
     inputs:
@@ -16,18 +15,91 @@ on:
           - prod
           - qa
 
+env:
+  TARGET_ENV: ${{ github.event.inputs.environment || 'qa' }}
+
 jobs:
-  deploy:
+  ensure-instance:
     runs-on: ubuntu-latest
-    env:
-      TARGET_ENV: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/qa' && 'qa' || 'prod') }}
+    outputs:
+      host: ${{ steps.ensure.outputs.host }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Ensure EC2 instance exists
+        id: ensure
+        run: |
+          set -e
+          INSTANCE_NAME="ec2-cpu-ollama-${{ env.TARGET_ENV }}"
+          KEY_PAIR="${{ vars.EC2_KEY_PAIR }}"
+
+          echo "Looking for running instance with tag Name=$INSTANCE_NAME..."
+          EXISTING_IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[*].Instances[0].PublicIpAddress' \
+            --output text 2>/dev/null | head -1)
+
+          if [ -n "$EXISTING_IP" ] && [ "$EXISTING_IP" != "None" ]; then
+            echo "Found existing instance: $EXISTING_IP"
+            echo "host=$EXISTING_IP" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "No running instance found. Creating new instance..."
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --image-id ${{ vars.AWS_AMI_ID }} \
+            --instance-type t4g.micro \
+            --key-name "$KEY_PAIR" \
+            --security-group-ids ${{ vars.AWS_SECURITY_GROUP_ID }} \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
+            --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=20,VolumeType=gp3}' \
+            --query 'Instances[0].InstanceId' \
+            --output text)
+
+          echo "Created instance $INSTANCE_ID. Waiting for it to be running..."
+          aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+
+          echo "Waiting for public IP..."
+          for i in $(seq 1 30); do
+            HOST=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].PublicIpAddress' \
+              --output text)
+            if [ -n "$HOST" ] && [ "$HOST" != "None" ]; then
+              echo "Instance ready at $HOST"
+              echo "Waiting for SSH to be available..."
+              for j in $(seq 1 24); do
+                if nc -z -w 5 "$HOST" 22 2>/dev/null; then
+                  echo "SSH ready"
+                  break
+                fi
+                [ $j -eq 24 ] && { echo "Timeout waiting for SSH"; exit 1; }
+                sleep 5
+              done
+              echo "host=$HOST" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Timeout waiting for public IP"
+          exit 1
+
+  deploy:
+    needs: ensure-instance
+    runs-on: ubuntu-latest
     steps:
       - name: SSH Deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ env.TARGET_ENV == 'prod' && secrets.EC2_HOST_PROD || secrets.EC2_HOST_QA }}
-          username: ${{ env.TARGET_ENV == 'prod' && secrets.EC2_USER_PROD || secrets.EC2_USER_QA }}
-          key: ${{ env.TARGET_ENV == 'prod' && secrets.EC2_SSH_KEY_PROD || secrets.EC2_SSH_KEY_QA }}
+          host: ${{ needs.ensure-instance.outputs.host }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
           script: |
             set -e
