@@ -39,7 +39,14 @@ jobs:
           EC2_KEY_PAIR: ${{ vars.EC2_KEY_PAIR || 'ec2' }}
         run: |
           set -e
-          [ -n "$AWS_SECURITY_GROUP_ID" ] || { echo "Error: Set AWS_SECURITY_GROUP_ID variable in GitHub Settings"; exit 1; }
+          if [ -z "$AWS_SECURITY_GROUP_ID" ]; then
+            echo "Resolving security group by name 'ec2'..."
+            AWS_SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=ec2" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)
+            if [ -z "$AWS_SECURITY_GROUP_ID" ] || [ "$AWS_SECURITY_GROUP_ID" = "None" ]; then
+              AWS_SECURITY_GROUP_ID="sg-01dad3e1686a3d49f"
+              echo "Using default security group $AWS_SECURITY_GROUP_ID"
+            fi
+          fi
 
           INSTANCE_NAME="ec2-cpu-ollama-${{ env.TARGET_ENV }}"
 
