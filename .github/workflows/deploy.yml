@@ -49,6 +49,13 @@ jobs:
             sudo systemctl enable ollama
             sudo systemctl restart ollama
 
+            echo "=== Waiting for Ollama API ==="
+            for i in $(seq 1 30); do
+              curl -sf http://127.0.0.1:11434/api/version >/dev/null && break
+              [ $i -eq 30 ] && { echo "Ollama failed to start"; exit 1; }
+              sleep 2
+            done
+
             echo "=== Pull embedding model ==="
             ollama pull bge-small-en-v1.5
 
