@@ -1,0 +1,56 @@
+name: Deploy Ollama (bge-small) to EC2
+
+on:
+  push:
+    branches:
+      - main
+      - qa
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deploy target"
+        required: true
+        default: "prod"
+        type: choice
+        options:
+          - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -e
+
+            echo "=== Install dependencies ==="
+            sudo apt-get update -y
+            sudo apt-get install -y curl
+
+            echo "=== Install Ollama (ARM64 auto-detect) ==="
+            if ! command -v ollama >/dev/null 2>&1; then
+              curl -fsSL https://ollama.com/install.sh | sh
+            fi
+
+            echo "=== Configure public API ==="
+            sudo mkdir -p /etc/systemd/system/ollama.service.d
+            printf '%s\n' '[Service]' 'Environment="OLLAMA_HOST=0.0.0.0:11434"' | sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable ollama
+            sudo systemctl restart ollama
+
+            echo "=== Pull embedding model ==="
+            ollama pull bge-small-en-v1.5
+
+            echo "=== (Optional tiny inference model for testing) ==="
+            ollama pull tinyllama || true
+
+            echo "=== Done ==="
+            curl http://127.0.0.1:11434
