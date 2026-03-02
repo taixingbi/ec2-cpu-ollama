@@ -34,7 +34,7 @@ jobs:
       - name: Ensure EC2 instance exists
         id: ensure
         env:
-          AWS_AMI_ID: ${{ vars.AWS_AMI_ID || 'resolve:ssm:/aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id' }}
+          AWS_AMI_ID: ${{ vars.AWS_AMI_ID || 'ami-01da1dbf9ea3a6ee6' }}
           AWS_SECURITY_GROUP_ID: ${{ vars.AWS_SECURITY_GROUP_ID }}
           EC2_KEY_PAIR: ${{ vars.EC2_KEY_PAIR || 'ec2' }}
         run: |
