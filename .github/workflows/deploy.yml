@@ -36,10 +36,9 @@ jobs:
         env:
           AWS_AMI_ID: ${{ vars.AWS_AMI_ID || 'ami-01da1dbf9ea3a6ee6' }}
           AWS_SECURITY_GROUP_ID: ${{ vars.AWS_SECURITY_GROUP_ID }}
-          EC2_KEY_PAIR: ${{ vars.EC2_KEY_PAIR }}
+          EC2_KEY_PAIR: ${{ vars.EC2_KEY_PAIR || 'ec2' }}
         run: |
           set -e
-          [ -n "$EC2_KEY_PAIR" ] || { echo "Error: Set EC2_KEY_PAIR variable in GitHub Settings"; exit 1; }
           [ -n "$AWS_SECURITY_GROUP_ID" ] || { echo "Error: Set AWS_SECURITY_GROUP_ID variable in GitHub Settings"; exit 1; }
 
           INSTANCE_NAME="ec2-cpu-ollama-${{ env.TARGET_ENV }}"
