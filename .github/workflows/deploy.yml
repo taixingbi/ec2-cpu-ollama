@@ -48,7 +48,7 @@ jobs:
             fi
           fi
 
-          INSTANCE_NAME="ec2-cpu-ollama-${{ env.TARGET_ENV }}"
+          INSTANCE_NAME="ec2-cpu-ollama"
 
           echo "Looking for running instance with tag Name=$INSTANCE_NAME..."
           EXISTING_IP=$(aws ec2 describe-instances \
