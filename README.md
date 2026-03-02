@@ -1,6 +1,6 @@
 # Ollama on AWS EC2 (t4g.micro)
 
-Deploy [Ollama](https://ollama.com) to a cheap AWS EC2 **t4g.micro** (ARM64) instance via GitHub Actions. Exposes **embeddings** (`bge-small-en-v1.5`) and light **inference** (`tinyllama`) over HTTP for RAG backends (Qdrant, FAISS, Atlas, etc.).
+Deploy [Ollama](https://ollama.com) to a cheap AWS EC2 **t4g.micro** (ARM64) instance via GitHub Actions. Exposes **embeddings** (`qllama/bge-small-en-v1.5`) and light **inference** (`tinyllama`) over HTTP for RAG backends (Qdrant, FAISS, Atlas, etc.).
 
 ## Architecture
 
@@ -46,7 +46,7 @@ The workflow will:
 
 1. Install dependencies and Ollama (if missing).
 2. Configure Ollama to listen on `0.0.0.0:11434`.
-3. Pull `bge-small-en-v1.5` and `tinyllama`.
+3. Pull `qllama/bge-small-en-v1.5` and `tinyllama`.
 4. Restart the service and run a local health check.
 
 ## Test from your Mac
@@ -57,7 +57,7 @@ Replace `EC2_IP` with your instance’s public IP.
 
 ```bash
 curl http://EC2_IP:11434/api/embeddings -d '{
-  "model": "bge-small-en-v1.5",
+  "model": "qllama/bge-small-en-v1.5",
   "prompt": "AWS ollama test"
 }'
 ```
@@ -75,7 +75,7 @@ curl http://EC2_IP:11434/api/generate -d '{
 
 This setup is for:
 
-- Embedding workloads (`bge-small-en-v1.5`).
+- Embedding workloads (`qllama/bge-small-en-v1.5`).
 - Light orchestration and dev/testing.
 - A stable, cheap RAG backend (~$5/month).
 

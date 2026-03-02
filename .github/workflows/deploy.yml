@@ -57,7 +57,7 @@ jobs:
             done
 
             echo "=== Pull embedding model ==="
-            ollama pull bge-small-en-v1.5
+            ollama pull qllama/bge-small-en-v1.5
 
             echo "=== (Optional tiny inference model for testing) ==="
             ollama pull tinyllama || true
