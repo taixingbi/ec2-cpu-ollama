@@ -21,33 +21,35 @@ flowchart LR
 
 ### 1. GitHub Secrets
 
-In the repo: **Settings → Secrets and variables → Actions**, add:
+**Settings → Secrets and variables → Actions → Secrets:**
 
-| Secret        | Value                |
-|---------------|----------------------|
-| `EC2_HOST`    | Your EC2 public IP   |
-| `EC2_USER`    | `ubuntu`             |
-| `EC2_SSH_KEY` | Full contents of your `.pem` file |
+| Secret                  | Value                  |
+|-------------------------|------------------------|
+| `AWS_ACCESS_KEY_ID`     | IAM access key         |
+| `AWS_SECRET_ACCESS_KEY` | IAM secret key         |
+| `EC2_SSH_KEY`           | Full contents of `.pem` |
 
 ### 2. EC2 security group
 
-Allow inbound TCP on port **11434** from your IP only (for safety):
+Create a security group (e.g. `ec2`) with inbound rules:
 
-- Type: Custom TCP  
-- Port: 11434  
-- Source: My IP (or a specific CIDR)
+- **SSH** (22) from `0.0.0.0/0`
+- **Custom TCP** (11434) from your IP or `0.0.0.0/0`
+
+### 3. AWS key pair
+
+Create a key pair (e.g. `ec2`) and add the private key to `EC2_SSH_KEY`.
 
 ## Deploy
 
-- **Automatic:** Push to the `main` branch → workflow runs and deploys to EC2.
+- **Automatic:** Push to `qa` → workflow finds or creates EC2, then deploys.
 - **Manual:** Actions → “Deploy Ollama (bge-small) to EC2” → “Run workflow”.
 
 The workflow will:
 
-1. Install dependencies and Ollama (if missing).
-2. Configure Ollama to listen on `0.0.0.0:11434`.
+1. Find existing instance (tag `ec2-cpu-ollama`) or create a new t4g.micro.
+2. SSH in, install Ollama, configure `0.0.0.0:11434`.
 3. Pull `qllama/bge-small-en-v1.5` and `tinyllama`.
-4. Restart the service and run a local health check.
 
 ## Test from your Mac
 
