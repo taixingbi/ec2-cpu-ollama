@@ -1,0 +1,157 @@
+name: Deploy Ollama (bge-small) to EC2
+
+on:
+  push:
+    branches:
+      - qa
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deploy target"
+        required: true
+        default: "prod"
+        type: choice
+        options:
+          - prod
+          - qa
+
+env:
+  TARGET_ENV: ${{ github.event.inputs.environment || 'qa' }}
+
+jobs:
+  ensure-instance:
+    runs-on: ubuntu-latest
+    outputs:
+      host: ${{ steps.ensure.outputs.host }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Ensure EC2 instance exists
+        id: ensure
+        env:
+          AWS_AMI_ID: ${{ vars.AWS_AMI_ID || 'ami-0071c8c431eea0edb' }}
+          AWS_SECURITY_GROUP_ID: ${{ vars.AWS_SECURITY_GROUP_ID }}
+          EC2_KEY_PAIR: ${{ vars.EC2_KEY_PAIR || 'ec2' }}
+        run: |
+          set -e
+          if [ -z "$AWS_SECURITY_GROUP_ID" ]; then
+            echo "Resolving security group by name 'ec2'..."
+            AWS_SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=ec2" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)
+            if [ -z "$AWS_SECURITY_GROUP_ID" ] || [ "$AWS_SECURITY_GROUP_ID" = "None" ]; then
+              AWS_SECURITY_GROUP_ID="sg-01dad3e1686a3d49f"
+              echo "Using default security group $AWS_SECURITY_GROUP_ID"
+            fi
+          fi
+
+          INSTANCE_NAME="ec2-cpu-ollama"
+
+          echo "Looking for running instance with tag Name=$INSTANCE_NAME..."
+          EXISTING_IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[*].Instances[0].PublicIpAddress' \
+            --output text 2>/dev/null | head -1)
+
+          if [ -n "$EXISTING_IP" ] && [ "$EXISTING_IP" != "None" ]; then
+            echo "Found existing instance: $EXISTING_IP"
+            echo "host=$EXISTING_IP" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "No running instance found. Creating new instance..."
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --image-id "$AWS_AMI_ID" \
+            --instance-type t4g.micro \
+            --key-name "$EC2_KEY_PAIR" \
+            --security-group-ids "$AWS_SECURITY_GROUP_ID" \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
+            --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=20,VolumeType=gp3}' \
+            --query 'Instances[0].InstanceId' \
+            --output text)
+
+          echo "Created instance $INSTANCE_ID. Waiting for it to be running..."
+          aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+
+          echo "Waiting for public IP..."
+          for i in $(seq 1 30); do
+            HOST=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].PublicIpAddress' \
+              --output text)
+            if [ -n "$HOST" ] && [ "$HOST" != "None" ]; then
+              echo "Instance ready at $HOST"
+              echo "Waiting for SSH to be available..."
+              for j in $(seq 1 24); do
+                if nc -z -w 5 "$HOST" 22 2>/dev/null; then
+                  echo "SSH ready"
+                  break
+                fi
+                [ $j -eq 24 ] && { echo "Timeout waiting for SSH"; exit 1; }
+                sleep 5
+              done
+              echo "host=$HOST" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Timeout waiting for public IP"
+          exit 1
+
+  deploy:
+    needs: ensure-instance
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ needs.ensure-instance.outputs.host }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -e
+
+            echo "=== Install dependencies ==="
+            sudo apt-get update -y
+            sudo apt-get install -y curl
+
+            echo "=== Install Ollama (ARM64 auto-detect) ==="
+            if ! command -v ollama >/dev/null 2>&1; then
+              curl -fsSL https://ollama.com/install.sh | sh
+            fi
+
+            echo "=== Configure public API ==="
+            sudo mkdir -p /etc/systemd/system/ollama.service.d
+            printf '%s\n' '[Service]' 'Environment="OLLAMA_HOST=0.0.0.0:11434"' | sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable ollama
+            sudo systemctl restart ollama
+
+            echo "=== Waiting for Ollama API ==="
+            sleep 5
+            for i in $(seq 1 45); do
+              curl -sf http://127.0.0.1:11434/api/version >/dev/null && break
+              if [ $i -eq 45 ]; then
+                echo "Ollama failed to start after 90s. Service status:"
+                sudo systemctl status ollama || true
+                echo "Recent logs:"
+                sudo journalctl -u ollama --no-pager -n 50 || true
+                exit 1
+              fi
+              sleep 2
+            done
+
+            echo "=== Pull embedding model ==="
+            ollama pull qllama/bge-small-en-v1.5
+
+            echo "=== (Optional tiny inference model for testing) ==="
+            ollama pull tinyllama || true
+
+            echo "=== Done ==="
+            curl http://127.0.0.1:11434
