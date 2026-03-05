@@ -112,13 +112,15 @@ jobs:
           INSTANCE_ID="${{ needs.ensure-instance.outputs.instance_id }}"
           BUCKET="${{ vars.DEPLOY_BUCKET }}"
           REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
-          S3_URL="https://${BUCKET}.s3.${REGION}.amazonaws.com/ec2-cpu-ollama/deploy.sh"
 
-          echo '{"sourceType":["S3"],"sourceInfo":["{\"path\":\"'"$S3_URL"'\"}"]}' > ssm-params.json
+          # Presigned URL allows instance to download (curl) without AWS credentials
+          PRESIGNED_URL=$(aws s3 presign "s3://${BUCKET}/ec2-cpu-ollama/deploy.sh" --expires-in 900)
 
+          # Run script via curl | bash - AWS-RunShellScript is more reliable than AWS-RunRemoteScript
+          echo "{\"commands\":[\"curl -fsSL $PRESIGNED_URL | sudo bash\"]}" > ssm-params.json
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunRemoteScript" \
+            --document-name "AWS-RunShellScript" \
             --parameters file://ssm-params.json \
             --timeout-seconds 600 \
             --output text \
