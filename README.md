@@ -34,8 +34,7 @@ flowchart LR
 
 | Variable                  | Value                          |
 |---------------------------|--------------------------------|
-| `DEPLOY_BUCKET`           | S3 bucket for deploy script    |
-| `EC2_IAM_INSTANCE_PROFILE`| IAM profile (SSM + S3 access) |
+| `EC2_IAM_INSTANCE_PROFILE`| IAM profile (SSM agent)        |
 
 ### 3. EC2 security group
 
@@ -46,14 +45,11 @@ Create a security group (e.g. `ec2`) with inbound rules:
 
 ### 4. IAM instance profile
 
-Create an IAM role (e.g. `ec2-ssm-role`) with:
-
-- `AmazonSSMManagedInstanceCore` (SSM agent)
-- `s3:GetObject` on your deploy bucket (`ec2-cpu-ollama/*`)
+Create an IAM role (e.g. `ec2-ssm-role`) with `AmazonSSMManagedInstanceCore` (SSM agent).
 
 ### 5. AWS key pair
 
-Create a key pair (e.g. `ec2`) for EC2 launch. The private key is not stored in GitHub; deploy uses S3 + SSM instead of SSH.
+Create a key pair (e.g. `ec2`) for EC2 launch. The private key is not stored in GitHub; deploy uses SSM instead of SSH.
 
 ## Deploy
 
@@ -63,7 +59,7 @@ Create a key pair (e.g. `ec2`) for EC2 launch. The private key is not stored in 
 The workflow will:
 
 1. Find existing instance (tag `ec2-cpu-ollama`) or create a new t4g.micro.
-2. Upload deploy script to S3, run it via SSM (no SSH).
+2. Run deploy script via SSM (no SSH, no S3).
 3. Install Ollama, configure `0.0.0.0:11434`, pull `qllama/bge-small-en-v1.5` and `tinyllama`.
 
 ## Test from your Mac

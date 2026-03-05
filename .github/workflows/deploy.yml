@@ -103,21 +103,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
-      - name: Upload deploy script to S3
-        run: |
-          aws s3 cp scripts/deploy.sh "s3://${{ vars.DEPLOY_BUCKET }}/ec2-cpu-ollama/deploy.sh" --content-type "text/x-shellscript"
-
       - name: Run deploy via SSM
         run: |
           INSTANCE_ID="${{ needs.ensure-instance.outputs.instance_id }}"
-          BUCKET="${{ vars.DEPLOY_BUCKET }}"
-          REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
 
-          # Presigned URL allows instance to download (curl) without AWS credentials
-          PRESIGNED_URL=$(aws s3 presign "s3://${BUCKET}/ec2-cpu-ollama/deploy.sh" --expires-in 900)
+          # Base64-encode script to avoid URL/JSON escaping issues; SSM runs it directly
+          SCRIPT_B64=$(base64 -w 0 < scripts/deploy.sh)
+          echo "{\"commands\":[\"echo $SCRIPT_B64 | base64 -d | sudo bash\"]}" > ssm-params.json
 
-          # Run script via curl | bash - AWS-RunShellScript is more reliable than AWS-RunRemoteScript
-          echo "{\"commands\":[\"curl -fsSL $PRESIGNED_URL | sudo bash\"]}" > ssm-params.json
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
