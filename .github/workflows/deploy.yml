@@ -93,52 +93,49 @@ jobs:
     needs: ensure-instance
     runs-on: ubuntu-latest
     steps:
-      - name: SSH Deploy
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          host: ${{ needs.ensure-instance.outputs.host }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script_stop: true
-          script: |
-            set -e
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
-            echo "=== Install dependencies ==="
-            sudo apt-get update -y
-            sudo apt-get install -y curl
+      - name: Upload deploy script to S3
+        run: |
+          aws s3 cp scripts/deploy.sh "s3://${{ vars.DEPLOY_BUCKET }}/ec2-cpu-ollama/deploy.sh" --content-type "text/x-shellscript"
 
-            echo "=== Install Ollama (ARM64 auto-detect) ==="
-            if ! command -v ollama >/dev/null 2>&1; then
-              curl -fsSL https://ollama.com/install.sh | sh
-            fi
+      - name: Run deploy via SSM
+        run: |
+          INSTANCE_ID="${{ needs.ensure-instance.outputs.instance_id }}"
+          BUCKET="${{ vars.DEPLOY_BUCKET }}"
+          REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
+          S3_URL="https://${BUCKET}.s3.${REGION}.amazonaws.com/ec2-cpu-ollama/deploy.sh"
 
-            echo "=== Configure public API ==="
-            sudo mkdir -p /etc/systemd/system/ollama.service.d
-            printf '%s\n' '[Service]' 'Environment="OLLAMA_HOST=0.0.0.0:11434"' | sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null
+          echo '{"sourceType":["S3"],"sourceInfo":["{\"path\":\"'"$S3_URL"'\"}"]}' > ssm-params.json
 
-            sudo systemctl daemon-reload
-            sudo systemctl enable ollama
-            sudo systemctl restart ollama
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunRemoteScript" \
+            --parameters file://ssm-params.json \
+            --timeout-seconds 600 \
+            --output text \
+            --query 'Command.CommandId')
 
-            echo "=== Waiting for Ollama API ==="
-            sleep 5
-            for i in $(seq 1 45); do
-              curl -sf http://127.0.0.1:11434/api/version >/dev/null && break
-              if [ $i -eq 45 ]; then
-                echo "Ollama failed to start after 90s. Service status:"
-                sudo systemctl status ollama || true
-                echo "Recent logs:"
-                sudo journalctl -u ollama --no-pager -n 50 || true
-                exit 1
-              fi
-              sleep 2
-            done
+          echo "Waiting for SSM command $COMMAND_ID to complete..."
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
 
-            echo "=== Pull embedding model ==="
-            ollama pull qllama/bge-small-en-v1.5
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query 'Status' \
+            --output text)
 
-            echo "=== (Optional tiny inference model for testing) ==="
-            ollama pull tinyllama || true
-
-            echo "=== Done ==="
-            curl http://127.0.0.1:11434
+          if [ "$STATUS" != "Success" ]; then
+            echo "Deploy failed with status: $STATUS"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+            exit 1
+          fi
+          echo "Deploy completed successfully"

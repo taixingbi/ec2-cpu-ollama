@@ -23,22 +23,37 @@ flowchart LR
 
 **Settings → Secrets and variables → Actions → Secrets:**
 
-| Secret                  | Value                  |
-|-------------------------|------------------------|
-| `AWS_ACCESS_KEY_ID`     | IAM access key         |
-| `AWS_SECRET_ACCESS_KEY` | IAM secret key         |
-| `EC2_SSH_KEY`           | Full contents of `.pem` |
+| Secret                   | Value          |
+|--------------------------|----------------|
+| `AWS_ACCESS_KEY_ID`      | IAM access key |
+| `AWS_SECRET_ACCESS_KEY`  | IAM secret key |
 
-### 2. EC2 security group
+### 2. GitHub Variables
+
+**Settings → Secrets and variables → Actions → Variables:**
+
+| Variable                  | Value                          |
+|---------------------------|--------------------------------|
+| `DEPLOY_BUCKET`           | S3 bucket for deploy script    |
+| `EC2_IAM_INSTANCE_PROFILE`| IAM profile (SSM + S3 access) |
+
+### 3. EC2 security group
 
 Create a security group (e.g. `ec2`) with inbound rules:
 
-- **SSH** (22) from `0.0.0.0/0`
-- **Custom TCP** (11434) from your IP or `0.0.0.0/0`
+- **Custom TCP** (11434) from your IP or `0.0.0.0/0` (Ollama API)
+- **SSH** (22) optional, for manual access only
 
-### 3. AWS key pair
+### 4. IAM instance profile
 
-Create a key pair (e.g. `ec2`) and add the private key to `EC2_SSH_KEY`.
+Create an IAM role (e.g. `ec2-ssm-role`) with:
+
+- `AmazonSSMManagedInstanceCore` (SSM agent)
+- `s3:GetObject` on your deploy bucket (`ec2-cpu-ollama/*`)
+
+### 5. AWS key pair
+
+Create a key pair (e.g. `ec2`) for EC2 launch. The private key is not stored in GitHub; deploy uses S3 + SSM instead of SSH.
 
 ## Deploy
 
@@ -48,8 +63,8 @@ Create a key pair (e.g. `ec2`) and add the private key to `EC2_SSH_KEY`.
 The workflow will:
 
 1. Find existing instance (tag `ec2-cpu-ollama`) or create a new t4g.micro.
-2. SSH in, install Ollama, configure `0.0.0.0:11434`.
-3. Pull `qllama/bge-small-en-v1.5` and `tinyllama`.
+2. Upload deploy script to S3, run it via SSM (no SSH).
+3. Install Ollama, configure `0.0.0.0:11434`, pull `qllama/bge-small-en-v1.5` and `tinyllama`.
 
 ## Test from your Mac
 
